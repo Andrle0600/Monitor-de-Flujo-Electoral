@@ -442,13 +442,14 @@ tr.row--gap td { color: var(--color-gap); }
             <th scope="col">Hora</th>
             <th scope="col">Δ Actas</th>
             <th scope="col">Votos Nuevos Grp.</th>
+            <th scope="col">VPA</th>
             <th scope="col">Share JP %</th>
             <th scope="col">Share Acum. JP %</th>
             <th scope="col">Estado</th>
           </tr>
         </thead>
         <tbody id="audit-tbody">
-          <tr><td colspan="6" class="table-empty">Ingrese el Punto de Referencia y al menos un snapshot más.</td></tr>
+          <tr><td colspan="7" class="table-empty">Ingrese el Punto de Referencia y al menos un snapshot más.</td></tr>
         </tbody>
       </table>
     </div>
@@ -471,15 +472,15 @@ tr.row--gap td { color: var(--color-gap); }
       </div>
 
       <div class="col-legend__item">
-        <span class="col-legend__name">Votos Nuevos Grp. (Caudal)</span>
-        <span class="col-legend__formula">(JP + Resto actual) − (JP + Resto anterior)</span>
-        <span class="col-legend__desc">La cantidad total de votos válidos contabilizados en el tramo para los principales candidatos. Es la bolsa o "universo" sobre el cual se calcula el porcentaje de captura (Share).</span>
+        <span class="col-legend__name">🧐 VPA (Votos Por Acta)</span>
+        <span class="col-legend__formula">Votos Nuevos Grupo ÷ Δ Actas</span>
+        <span class="col-legend__desc">Mide la "densidad" de cada acta en ese tramo. En Perú una mesa tiene entre 200–300 electores; sumados los 9 candidatos principales el rango sano es de <strong>70 a 250</strong>. Un valor <strong style="color:var(--color-alert)">muy bajo (&lt;70)</strong> podría indicar ausentismo extremo; un valor <strong style="color:var(--color-alert)">muy alto (&gt;250)</strong> es físicamente sospechoso. Se ignora en la fase JEE. El icono ⚠️ marca celdas fuera de rango.</span>
       </div>
 
       <div class="col-legend__item col-legend__item--alert">
         <span class="col-legend__name">⚠ Share JP % (Captura del Tramo)</span>
         <span class="col-legend__formula">(Votos nuevos JP) ÷ (Caudal total del tramo)</span>
-        <span class="col-legend__desc">De la "bolsa" de votos nuevos de este tramo específico, ¿qué porcentaje obtuvo JP? Si este valor se dispara sin un factor geográfico y matemático que lo explique (ej., un bolsón de votantes afines procesado de golpe), el sistema levanta una <strong style="color:var(--color-alert)">alerta roja 🔴</strong> señalando que requiere revisión manual.</span>
+        <span class="col-legend__desc">De la "bolsa" de votos nuevos de este tramo específico, ¿qué porcentaje obtuvo JP? La <strong style="color:var(--color-alert)">alerta roja 🔴</strong> ahora requiere dos condiciones simultáneas: (1) que el Share supere en ≥40% al promedio acumulado, <em>y</em> (2) que el VPA sea atípico. Esto filtra los falsos positivos de bolsones regionales legítimos.</span>
       </div>
 
       <div class="col-legend__item col-legend__item--acum">
@@ -492,7 +493,7 @@ tr.row--gap td { color: var(--color-gap); }
         <span class="col-legend__name">Estado</span>
         <span class="col-legend__desc">
           <strong style="color:var(--color-normal)">✓ Normal:</strong> El share del tramo está dentro del rango esperado.<br>
-          <strong style="color:var(--color-alert)">🔴 Predominancia Inusual:</strong> El share del tramo supera en ≥40% al promedio acumulado — posible anomalía.<br>
+          <strong style="color:var(--color-alert)">🔴 Anomalía Confirmada:</strong> Share alto (≥40% sobre el acumulado) <em>y</em> VPA atípico al mismo tiempo. Punto crítico de auditoría.<br>
           <strong style="color:var(--color-jee)">🔵 Fase JEE:</strong> Más del 91% de actas procesadas. Etapa lenta de actas observadas/impugnadas.<br>
           <strong style="color:var(--color-gap)">⚠ Brecha de Datos:</strong> Más de 5 horas entre snapshots consecutivos sin registro.
         </span>
@@ -514,6 +515,11 @@ tr.row--gap td { color: var(--color-gap); }
   <!-- ── GRÁFICO HORARIO ────────────────────────────────── -->
   <div class="chart-card" style="margin-bottom: 20px;">
     <canvas id="chart-hourly" aria-label="Velocidad media de procesamiento por hora del día"></canvas>
+  </div>
+
+  <!-- ── GRÁFICO DE DISPERSIÓN ───────────────────────────── -->
+  <div class="chart-card" style="margin-bottom: 20px;">
+    <canvas id="chart-scatter" aria-label="Dispersión: VPA vs Share JP por tramo"></canvas>
   </div>
 
   <!-- ── LEYENDA ────────────────────────────────────────── -->
@@ -567,8 +573,10 @@ class StorageManager {
    MÓDULO: MetricsCalculator
    Responsabilidad: Toda la lógica matemática de análisis forense.
 ============================================================ */
-const TOTAL_ACTAS    = 92766;
+const TOTAL_ACTAS     = 92766;
 const ALERT_THRESHOLD = 1.40; // +40% sobre share acumulado
+const VPA_MIN         = 70;
+const VPA_MAX         = 250;
 
 class MetricsCalculator {
   computeRows(snapshots) {
@@ -612,15 +620,20 @@ class MetricsCalculator {
       acumDeltaJP += deltaJP;
       const shareAcumulado = acumCaudal > 0 ? acumDeltaJP / acumCaudal : 0;
 
-      const vph       = deltaHoras > 0 ? caudal / deltaHoras : 0;
-      const isDataGap = deltaHoras > 5;
-      const isAlert   = shareAcumulado > 0 && shareTramo >= shareAcumulado * ALERT_THRESHOLD;
-      const isJEE     = curr.pct_actas > 91;
+      const vph          = deltaHoras > 0 ? caudal / deltaHoras : 0;
+      const isDataGap    = deltaHoras > 5;
+      const isJEE        = curr.pct_actas > 91;
+      const vpa          = (!isJEE && deltaActas > 0) ? caudal / deltaActas : null;
+      const isVpaAtipico = vpa !== null && (vpa < VPA_MIN || vpa > VPA_MAX);
+      const isAlert      = !isJEE && shareAcumulado > 0
+                           && shareTramo >= shareAcumulado * ALERT_THRESHOLD
+                           && isVpaAtipico;
 
       rows.push({
         snapshot: curr, isZeroRow: false,
         deltaActas, deltaJP, deltaResto, caudal,
         shareTramo, shareAcumulado, vph, deltaHoras,
+        vpa, isVpaAtipico,
         isAlert, isJEE, isDataGap,
       });
     }
@@ -734,7 +747,7 @@ function baseChartOptions(titleText) {
 }
 
 class ChartManager {
-  constructor() { this.flowChart = null; this.logChart = null; this.hourlyChart = null; }
+  constructor() { this.flowChart = null; this.logChart = null; this.hourlyChart = null; this.scatterChart = null; }
 
   init() {
     const flowOpts = baseChartOptions('Flujo de Votos por Tramo');
@@ -781,6 +794,29 @@ class ChartManager {
     this.hourlyChart = new Chart(
       document.getElementById('chart-hourly').getContext('2d'),
       { type: 'bar', data: { labels: hourlyLabels, datasets: [] }, options: hourlyOpts }
+    );
+
+    const scatterOpts = baseChartOptions('Dispersión de Densidad: VPA vs. Share JP (sin fase JEE)');
+    scatterOpts.plugins.tooltip = {
+      backgroundColor: 'rgba(45,55,72,0.9)',
+      titleFont: { family: FONT_FAM, size: 11 },
+      bodyFont:  { family: FONT_FAM, size: 11 },
+      cornerRadius: 6, padding: 9,
+      callbacks: {
+        label: ctx => {
+          const p = ctx.raw;
+          return [`Hora: ${p.label}`, `VPA: ${p.x.toFixed(1)}`, `Share JP: ${p.y.toFixed(2)}%`];
+        },
+      },
+    };
+    scatterOpts.scales.x.title = { display: true, text: 'Votos por Acta (VPA)', font: { family: FONT_FAM, size: 11 }, color: '#718096' };
+    scatterOpts.scales.y.title = { display: true, text: 'Share JP del Tramo (%)', font: { family: FONT_FAM, size: 11 }, color: '#718096' };
+    scatterOpts.scales.y.ticks.callback = val => `${val.toFixed(1)}%`;
+    scatterOpts.plugins.legend.display = true;
+
+    this.scatterChart = new Chart(
+      document.getElementById('chart-scatter').getContext('2d'),
+      { type: 'scatter', data: { datasets: [] }, options: scatterOpts }
     );
   }
 
@@ -870,6 +906,38 @@ class ChartManager {
       },
     ];
     this.hourlyChart.update();
+
+    // ── Fourth Chart: Scatter Plot VPA vs Share JP ──
+    const normalPoints = [];
+    const alertPoints  = [];
+
+    rows.forEach(r => {
+      if (r.isZeroRow || r.isJEE || r.vpa === null) return;
+      const d = new Date(r.snapshot.timestamp);
+      const label = d.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', hour12: false });
+      const point = { x: r.vpa, y: r.shareTramo * 100, label };
+      if (r.isAlert) alertPoints.push(point);
+      else           normalPoints.push(point);
+    });
+
+    this.scatterChart.data.datasets = [
+      {
+        label: 'Normal',
+        data: normalPoints,
+        backgroundColor: 'rgba(56, 161, 105, 0.65)',
+        pointRadius: 7,
+        pointHoverRadius: 9,
+      },
+      {
+        label: '⚠ Anomalía Confirmada',
+        data: alertPoints,
+        backgroundColor: 'rgba(197, 48, 48, 0.80)',
+        pointRadius: 9,
+        pointHoverRadius: 11,
+        pointStyle: 'rectRot',
+      },
+    ];
+    this.scatterChart.update();
   }
 
   _clear() {
@@ -880,6 +948,7 @@ class ChartManager {
         c.update(); 
       }
     });
+    if (this.scatterChart) { this.scatterChart.data.datasets = []; this.scatterChart.update(); }
   }
 }
 
@@ -978,6 +1047,9 @@ function renderTable(rows) {
     const fecha   = d.toLocaleDateString('es', { day: '2-digit', month: '2-digit' });
     const dActas  = row.isZeroRow ? '—' : `≈ ${Math.round(row.deltaActas).toLocaleString('es')}`;
     const caudal  = row.isZeroRow ? '—' : row.caudal.toLocaleString('es');
+    const vpaVal  = row.isZeroRow || row.vpa === null
+      ? '—'
+      : `${row.vpa.toFixed(1)}${row.isVpaAtipico ? ' <span title="Densidad atípica" style="color:var(--color-gap)">\u26a0\uFE0F</span>' : ''}`;
     const sTramo  = row.shareTramo   == null ? '—' : `${(row.shareTramo   * 100).toFixed(2)}%`;
     const sAcum   = row.shareAcumulado == null ? '—' : `${(row.shareAcumulado * 100).toFixed(2)}%`;
     const sCls    = row.isAlert ? 'share-value high' : 'share-value normal';
@@ -986,6 +1058,7 @@ function renderTable(rows) {
       <td><strong>${hora}</strong><br><span style="font-size:.7rem;color:var(--text-secondary)">${fecha}</span></td>
       <td>${dActas}</td>
       <td>${caudal}</td>
+      <td style="font-family:var(--font-mono);font-size:.78rem">${vpaVal}</td>
       <td class="${sCls}">${sTramo}</td>
       <td style="font-family:var(--font-mono);font-size:.78rem;color:var(--text-secondary)">${sAcum}</td>
       <td>${buildBadge(row)}</td>`;
@@ -995,9 +1068,10 @@ function renderTable(rows) {
 
 function buildBadge(row) {
   if (row.isZeroRow)  return '<span class="badge badge--zero">Punto de Referencia</span>';
-  if (row.isAlert)    return '<span class="badge badge--alert">🔴 Predominancia Inusual</span>';
+  if (row.isAlert)    return '<span class="badge badge--alert">🔴 Anomalía Confirmada</span>';
   if (row.isJEE)      return '<span class="badge badge--jee">🔵 Fase JEE / Actas Obs.</span>';
   if (row.isDataGap)  return '<span class="badge badge--gap">⚠ Brecha de Datos</span>';
+  if (row.isVpaAtipico) return '<span class="badge badge--gap">⚠\uFE0F VPA Atípico</span>';
   return                     '<span class="badge badge--normal">✓ Normal</span>';
 }
 
@@ -1011,6 +1085,7 @@ function renderSummary(rows) {
   sumTotal.textContent  = `${last.snapshot.pct_actas.toFixed(2)}% actas`;
   sumAlerts.textContent = `${alerta}`;
   sumAlerts.style.color = alerta > 0 ? 'var(--color-alert)' : 'var(--color-normal)';
+  sumAlerts.title = alerta > 0 ? 'Tramos con Share alto Y VPA atípico simultáneamente' : '';
 }
 
 // ── Evento: Formulario ───────────────────────────────────────
