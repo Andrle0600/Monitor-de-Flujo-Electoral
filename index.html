@@ -40,6 +40,7 @@
   --color-primary:  #4299e1;
   --color-primary-hover: #3182ce;
   --color-danger:   #fc8181;
+  --color-hourly:   #4299e1;
   --shadow-card:    0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.05);
   --shadow-card-hover: 0 4px 12px rgba(0,0,0,0.10);
   --radius:         8px;
@@ -491,7 +492,7 @@ tr.row--gap td { color: var(--color-gap); }
         <span class="col-legend__name">Estado</span>
         <span class="col-legend__desc">
           <strong style="color:var(--color-normal)">✓ Normal:</strong> El share del tramo está dentro del rango esperado.<br>
-          <strong style="color:var(--color-alert)">🔴 Predominancia Inusual:</strong> El share del tramo supera en ≥20% al promedio acumulado — posible anomalía.<br>
+          <strong style="color:var(--color-alert)">🔴 Predominancia Inusual:</strong> El share del tramo supera en ≥40% al promedio acumulado — posible anomalía.<br>
           <strong style="color:var(--color-jee)">🔵 Fase JEE:</strong> Más del 91% de actas procesadas. Etapa lenta de actas observadas/impugnadas.<br>
           <strong style="color:var(--color-gap)">⚠ Brecha de Datos:</strong> Más de 5 horas entre snapshots consecutivos sin registro.
         </span>
@@ -510,13 +511,19 @@ tr.row--gap td { color: var(--color-gap); }
     </div>
   </div>
 
+  <!-- ── GRÁFICO HORARIO ────────────────────────────────── -->
+  <div class="chart-card" style="margin-bottom: 20px;">
+    <canvas id="chart-hourly" aria-label="Velocidad media de procesamiento por hora del día"></canvas>
+  </div>
+
   <!-- ── LEYENDA ────────────────────────────────────────── -->
   <div class="legend-strip" role="note">
     <div class="legend-item"><span class="legend-dot" style="background:var(--color-jp)"></span> JP / Normal</div>
     <div class="legend-item"><span class="legend-dot" style="background:var(--color-resto)"></span> Resto Top 8</div>
-    <div class="legend-item"><span class="legend-dot" style="background:var(--color-alert)"></span> Anomalía (+20% vs. share acum.)</div>
+    <div class="legend-item"><span class="legend-dot" style="background:var(--color-alert)"></span> Anomalía (+40% vs. share acum.)</div>
     <div class="legend-item"><span class="legend-dot" style="background:var(--color-jee)"></span> Fase JEE (&gt;91% actas)</div>
     <div class="legend-item"><span class="legend-dot" style="background:var(--color-gap)"></span> Brecha de Datos (&gt;5 hrs)</div>
+    <div class="legend-item"><span class="legend-dot" style="background:rgba(221, 107, 32, 0.5)"></span> Extrapolación (Sin Snapshot Directo)</div>
   </div>
 
 </div><!-- /page-wrapper -->
@@ -561,7 +568,7 @@ class StorageManager {
    Responsabilidad: Toda la lógica matemática de análisis forense.
 ============================================================ */
 const TOTAL_ACTAS    = 92766;
-const ALERT_THRESHOLD = 1.20; // +20% sobre share acumulado
+const ALERT_THRESHOLD = 1.40; // +40% sobre share acumulado
 
 class MetricsCalculator {
   computeRows(snapshots) {
@@ -727,7 +734,7 @@ function baseChartOptions(titleText) {
 }
 
 class ChartManager {
-  constructor() { this.flowChart = null; this.logChart = null; }
+  constructor() { this.flowChart = null; this.logChart = null; this.hourlyChart = null; }
 
   init() {
     const flowOpts = baseChartOptions('Flujo de Votos por Tramo');
@@ -759,6 +766,22 @@ class ChartManager {
       document.getElementById('chart-log').getContext('2d'),
       { type: 'bar', data: { labels: [], datasets: [] }, options: logOpts }
     );
+
+    const hourlyOpts = baseChartOptions('Velocidad Promedio de Actas por Hora del Día');
+    hourlyOpts.plugins.tooltip = {
+      backgroundColor: 'rgba(45,55,72,0.9)',
+      titleFont: { family: FONT_FAM, size: 11 },
+      bodyFont:  { family: FONT_FAM, size: 11 },
+      cornerRadius: 6, padding: 9,
+      callbacks: { label: ctx => `${Math.round(ctx.parsed.y).toLocaleString('es')} actas/hora` },
+    };
+
+    const hourlyLabels = Array.from({length: 24}, (_, i) => `${i.toString().padStart(2, '0')}:00`);
+
+    this.hourlyChart = new Chart(
+      document.getElementById('chart-hourly').getContext('2d'),
+      { type: 'bar', data: { labels: hourlyLabels, datasets: [] }, options: hourlyOpts }
+    );
   }
 
   update(rows) {
@@ -788,11 +811,74 @@ class ChartManager {
       { label: 'Δ Actas Procesadas', data: actasData, backgroundColor: logColors, borderRadius: 3, borderSkipped: false },
     ];
     this.logChart.update();
+
+    // ── Third Chart: Hourly Processing Velocity ──
+    const hourlyBuckets = Array.from({ length: 24 }, () => []);
+    
+    rows.forEach(r => {
+      // Ingoramos JEE y el snapCero
+      if (r.isZeroRow || r.snapshot.pct_actas > 91) return;
+      if (r.deltaHoras > 0) {
+        const velocity = r.deltaActas / r.deltaHoras;
+        
+        const endMs = new Date(r.snapshot.timestamp).getTime();
+        const startMs = endMs - (r.deltaHoras * 3_600_000); // 1 hora en milisegundos
+        
+        // Calculamos todas las horas de reloj que tocó este tramo
+        const hoursAffected = new Set();
+        for (let t = startMs; t <= endMs; t += 15 * 60 * 1000) { // Saltos de 15 min
+          hoursAffected.add(new Date(t).getHours());
+        }
+        const endHour = new Date(endMs).getHours();
+        hoursAffected.add(endHour);
+
+        // Asignamos la velocidad promedio a cada una de las horas transcurridas
+        hoursAffected.forEach(h => {
+          // El dato solo es "real" para la hora en la que explícitamente se cerró el snapshot.
+          const isRealPoint = (h === endHour);
+          hourlyBuckets[h].push({ velocity, isRealPoint });
+        });
+      }
+    });
+
+    const hourlyAverages = [];
+    const hourlyColors = [];
+
+    hourlyBuckets.forEach(b => {
+      if (b.length > 0) {
+        // Promedio matemático del bucket
+        const avg = Math.round(b.reduce((sum, item) => sum + item.velocity, 0) / b.length);
+        hourlyAverages.push(avg);
+        
+        // Si al menos un registro en este bucket proviene de la hora exacta de un snapshot, es dato verificado (azul).
+        // De lo contrario, todo el bucket fue rellenado por extrapolación (naranja translúcido).
+        const hasRealData = b.some(item => item.isRealPoint);
+        hourlyColors.push(hasRealData ? 'rgba(66, 153, 225, 0.85)' : 'rgba(221, 107, 32, 0.50)');
+      } else {
+        hourlyAverages.push(0);
+        hourlyColors.push('rgba(66, 153, 225, 0.85)');
+      }
+    });
+
+    this.hourlyChart.data.datasets = [
+      { 
+        label: 'Promedio Actas/Hora', 
+        data: hourlyAverages, 
+        backgroundColor: hourlyColors, 
+        borderRadius: 3, 
+        borderSkipped: false 
+      },
+    ];
+    this.hourlyChart.update();
   }
 
   _clear() {
-    [this.flowChart, this.logChart].forEach(c => {
-      if (c) { c.data.labels = []; c.data.datasets = []; c.update(); }
+    [this.flowChart, this.logChart, this.hourlyChart].forEach(c => {
+      if (c) { 
+        if (c !== this.hourlyChart) c.data.labels = []; 
+        c.data.datasets = []; 
+        c.update(); 
+      }
     });
   }
 }
