@@ -260,7 +260,7 @@ tr.row--gap td { color: var(--color-gap); }
 @media (max-width: 740px) { .charts-grid { grid-template-columns: 1fr; } }
 .chart-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow-card); }
 
-/* ── Leyenda ── */
+/* ── Leyenda de colores ── */
 .legend-strip {
   display: flex; flex-wrap: wrap; gap: 12px;
   font-size: 0.76rem; color: var(--text-secondary);
@@ -270,6 +270,65 @@ tr.row--gap td { color: var(--color-gap); }
 }
 .legend-item { display: flex; align-items: center; gap: 5px; }
 .legend-dot  { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+/* ── Leyenda de columnas ── */
+.col-legend {
+  margin-top: 12px;
+  padding: 14px 20px;
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--color-jp);
+  border-radius: 0 0 var(--radius) var(--radius);
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+.col-legend__title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+.col-legend__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 24px;
+}
+@media (max-width: 640px) {
+  .col-legend__grid { grid-template-columns: 1fr; }
+}
+.col-legend__item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--border);
+  background: var(--bg-card);
+}
+.col-legend__item--alert { border-left-color: var(--color-alert); }
+.col-legend__item--acum  { border-left-color: var(--color-primary); }
+.col-legend__name {
+  font-weight: 700;
+  font-size: 0.78rem;
+  color: var(--text-primary);
+}
+.col-legend__formula {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--color-primary);
+  background: #ebf4ff;
+  border-radius: 3px;
+  padding: 1px 5px;
+  display: inline-block;
+  margin: 2px 0;
+}
+.col-legend__desc {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
 
 /* ── Input CSV oculto ── */
 #csv-import-input { display: none; }
@@ -393,6 +452,53 @@ tr.row--gap td { color: var(--color-gap); }
       </table>
     </div>
   </section>
+
+  <!-- ── LEYENDA DE COLUMNAS ──────────────────────────────── -->
+  <div class="col-legend" role="note" aria-label="Guía de interpretación de columnas">
+    <div class="col-legend__title">📖 Guía de Interpretación — ¿Qué significa cada columna?</div>
+    <div class="col-legend__grid">
+
+      <div class="col-legend__item">
+        <span class="col-legend__name">🕐 Hora (Bloques de Tiempo)</span>
+        <span class="col-legend__desc">Cada fila representa un "tramo" o ventana de tiempo entre una actualización de datos y la consecutiva. Permite auditar el ritmo de procesamiento por intervalos.</span>
+      </div>
+
+      <div class="col-legend__item">
+        <span class="col-legend__name">Δ Actas (Tamaño del Paquete)</span>
+        <span class="col-legend__formula">92,766 × ((% actas actual − % actas anterior) ÷ 100)</span>
+        <span class="col-legend__desc">Volumen estimado de actas procesadas en ese tramo. Un volumen alto indica procesamiento fluido; un volumen muy bajo puede deberse a la hora, problemas técnicos, o la fase de lentitud final (actas observadas).</span>
+      </div>
+
+      <div class="col-legend__item">
+        <span class="col-legend__name">Votos Nuevos Grp. (Caudal)</span>
+        <span class="col-legend__formula">(JP + Resto actual) − (JP + Resto anterior)</span>
+        <span class="col-legend__desc">La cantidad total de votos válidos contabilizados en el tramo para los principales candidatos. Es la bolsa o "universo" sobre el cual se calcula el porcentaje de captura (Share).</span>
+      </div>
+
+      <div class="col-legend__item col-legend__item--alert">
+        <span class="col-legend__name">⚠ Share JP % (Captura del Tramo)</span>
+        <span class="col-legend__formula">(Votos nuevos JP) ÷ (Caudal total del tramo)</span>
+        <span class="col-legend__desc">De la "bolsa" de votos nuevos de este tramo específico, ¿qué porcentaje obtuvo JP? Si este valor se dispara sin un factor geográfico y matemático que lo explique (ej., un bolsón de votantes afines procesado de golpe), el sistema levanta una <strong style="color:var(--color-alert)">alerta roja 🔴</strong> señalando que requiere revisión manual.</span>
+      </div>
+
+      <div class="col-legend__item col-legend__item--acum">
+        <span class="col-legend__name">Share Acum. JP % (Termómetro Base)</span>
+        <span class="col-legend__formula">Votos ganados desde el inicio ÷ Caudal ganado desde el inicio</span>
+        <span class="col-legend__desc">El promedio general de captura de votos del candidato desde el punto de referencia cero. Funciona como la línea base de la "normalidad estadística". Se utiliza para contrastar la veracidad del share de cada tramo individual y descartar anomalías pasajeras.</span>
+      </div>
+
+      <div class="col-legend__item">
+        <span class="col-legend__name">Estado</span>
+        <span class="col-legend__desc">
+          <strong style="color:var(--color-normal)">✓ Normal:</strong> El share del tramo está dentro del rango esperado.<br>
+          <strong style="color:var(--color-alert)">🔴 Predominancia Inusual:</strong> El share del tramo supera en ≥20% al promedio acumulado — posible anomalía.<br>
+          <strong style="color:var(--color-jee)">🔵 Fase JEE:</strong> Más del 91% de actas procesadas. Etapa lenta de actas observadas/impugnadas.<br>
+          <strong style="color:var(--color-gap)">⚠ Brecha de Datos:</strong> Más de 5 horas entre snapshots consecutivos sin registro.
+        </span>
+      </div>
+
+    </div>
+  </div>
 
   <!-- ── GRÁFICOS ───────────────────────────────────────── -->
   <div class="charts-grid">
