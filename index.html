@@ -674,11 +674,12 @@ class CsvHandler {
           const lines  = e.target.result.trim().split(/\r?\n/);
           if (lines.length < 2) throw new Error('El CSV no contiene registros.');
           const header = lines[0].split(',').map(h => h.trim().toLowerCase());
-          for (const col of CSV_HEADERS) {
+          const headersLower = CSV_HEADERS.map(c => c.toLowerCase());
+          for (const col of headersLower) {
             if (!header.includes(col)) throw new Error(`Columna requerida faltante: "${col}"`);
           }
           const idx = {};
-          CSV_HEADERS.forEach(col => { idx[col] = header.indexOf(col); });
+          headersLower.forEach(col => { idx[col] = header.indexOf(col); });
           const snapshots = lines.slice(1).filter(l => l.trim()).map((line, i) => {
             const v = line.split(',').map(x => x.trim());
             const pct = parseFloat(v[idx['pct_actas']]);
@@ -688,7 +689,7 @@ class CsvHandler {
             return {
               id: `import_${Date.now()}_${i}`,
               timestamp:      v[idx['timestamp']],
-              isZero:         v[idx['isZero']] === '1' || v[idx['isZero']] === 'true',
+              isZero:         v[idx['iszero']] === '1' || v[idx['iszero']] === 'true',
               pct_actas:      pct,
               votos_auditado: jp,
               votos_resto_top:rst,
