@@ -491,7 +491,7 @@ tr.row--gap td { color: var(--color-gap); }
         <span class="col-legend__name">Estado</span>
         <span class="col-legend__desc">
           <strong style="color:var(--color-normal)">✓ Normal:</strong> El share del tramo está dentro del rango esperado.<br>
-          <strong style="color:var(--color-alert)">🔴 Predominancia Inusual:</strong> El share del tramo supera en ≥20% al promedio acumulado — posible anomalía.<br>
+          <strong style="color:var(--color-alert)">🔴 Predominancia Inusual:</strong> El share del tramo supera en ≥40% al promedio acumulado — posible anomalía.<br>
           <strong style="color:var(--color-jee)">🔵 Fase JEE:</strong> Más del 91% de actas procesadas. Etapa lenta de actas observadas/impugnadas.<br>
           <strong style="color:var(--color-gap)">⚠ Brecha de Datos:</strong> Más de 5 horas entre snapshots consecutivos sin registro.
         </span>
@@ -561,7 +561,7 @@ class StorageManager {
    Responsabilidad: Toda la lógica matemática de análisis forense.
 ============================================================ */
 const TOTAL_ACTAS    = 92766;
-const ALERT_THRESHOLD = 1.20; // +20% sobre share acumulado
+const ALERT_THRESHOLD = 1.40; // +40% sobre share acumulado
 
 class MetricsCalculator {
   computeRows(snapshots) {
